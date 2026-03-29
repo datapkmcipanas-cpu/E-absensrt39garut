@@ -33,6 +33,7 @@ import {
   Clock, 
   MapPin, 
   User, 
+  Users,
   LogOut, 
   LogIn, 
   History, 
@@ -222,6 +223,7 @@ export default function App() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const [pendingType, setPendingType] = useState<'clock-in' | 'clock-out' | null>(null);
+  const [activeTab, setActiveTab] = useState<'absen' | 'history' | 'dashboard' | 'profile'>('absen');
 
   // Update clock every second
   useEffect(() => {
@@ -264,6 +266,7 @@ export default function App() {
       } else {
         setProfile(null);
         setAttendanceHistory([]);
+        setActiveTab('absen');
       }
       setLoading(false);
     });
@@ -350,7 +353,7 @@ export default function App() {
       q = query(
         collection(db, 'attendance'),
         orderBy('timestamp', 'desc'),
-        limit(50)
+        limit(500)
       );
     } else {
       q = query(
@@ -407,7 +410,7 @@ export default function App() {
       const position = await new Promise<GeolocationPosition>((resolve, reject) => {
         navigator.geolocation.getCurrentPosition(resolve, reject, {
           enableHighAccuracy: true,
-          timeout: 7000,
+          timeout: 15000,
           maximumAge: 60000
         });
       });
@@ -416,6 +419,7 @@ export default function App() {
         userId: user.uid,
         userName: profile?.displayName || user.displayName || 'Pegawai',
         nip: profile?.nip || '',
+        position: profile?.position || 'Pegawai',
         timestamp: new Date().toISOString(),
         type: pendingType,
         location: {
@@ -425,18 +429,44 @@ export default function App() {
         photoUrl: photoBase64
       };
 
-      await addDoc(collection(db, 'attendance'), record);
+      try {
+        await addDoc(collection(db, 'attendance'), record);
+      } catch (error) {
+        handleFirestoreError(error, OperationType.WRITE, 'attendance');
+      }
+      
       setStatus({ 
         type: 'success', 
         message: `Berhasil ${pendingType === 'clock-in' ? 'Masuk' : 'Pulang'}!` 
       });
     } catch (error) {
       console.error('Attendance error:', error);
+      let errorMessage = 'Gagal mencatat absensi. Silakan coba lagi.';
+      
+      if (error instanceof GeolocationPositionError) {
+        if (error.code === error.TIMEOUT) {
+          errorMessage = 'Gagal mendapatkan lokasi (Timeout). Pastikan GPS aktif dan Anda berada di area terbuka.';
+        } else if (error.code === error.PERMISSION_DENIED) {
+          errorMessage = 'Izin lokasi ditolak. Mohon izinkan akses lokasi untuk melakukan absensi.';
+        } else {
+          errorMessage = 'Gagal mendapatkan lokasi. Pastikan GPS aktif.';
+        }
+      } else if (error instanceof Error) {
+        try {
+          // Check if it's our JSON error info
+          const errInfo = JSON.parse(error.message);
+          if (errInfo.error) {
+            errorMessage = `Gagal: ${errInfo.error}`;
+          }
+        } catch (e) {
+          // Not a JSON error, use the message directly
+          errorMessage = `Gagal: ${error.message}`;
+        }
+      }
+
       setStatus({ 
         type: 'error', 
-        message: error instanceof GeolocationPositionError 
-          ? 'Gagal mendapatkan lokasi. Pastikan GPS aktif.' 
-          : 'Gagal mencatat absensi. Silakan coba lagi.' 
+        message: errorMessage
       });
     } finally {
       setIsClocking(false);
@@ -444,6 +474,267 @@ export default function App() {
       setTimeout(() => setStatus(null), 5000);
     }
   };
+
+  const getEmployeeStatus = () => {
+    const today = format(new Date(), 'yyyy-MM-dd');
+    return DEFAULT_EMPLOYEES.map(emp => {
+      const records = attendanceHistory.filter(r => r.nip === emp.nip);
+      const todayRecords = records.filter(r => r.timestamp.startsWith(today));
+      
+      const clockIn = todayRecords.find(r => r.type === 'clock-in');
+      const clockOut = todayRecords.find(r => r.type === 'clock-out');
+      
+      return { 
+        ...emp, 
+        clockInTime: clockIn ? format(new Date(clockIn.timestamp), 'HH:mm') : null,
+        clockOutTime: clockOut ? format(new Date(clockOut.timestamp), 'HH:mm') : null,
+        hasClockIn: !!clockIn,
+        hasClockOut: !!clockOut
+      };
+    });
+  };
+
+  const renderAbsenTab = () => (
+    <div className="space-y-6">
+      <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex items-center gap-4">
+        <div className="w-14 h-14 bg-gray-100 rounded-full overflow-hidden border-2 border-white shadow-sm">
+          <img 
+            src={user?.photoURL || `https://ui-avatars.com/api/?name=${profile?.displayName}&background=random`} 
+            alt="Profile" 
+            className="w-full h-full object-cover"
+          />
+        </div>
+        <div className="flex-1">
+          <h3 className="font-bold text-gray-900 leading-tight">
+            {profile?.email === 'datapkmcipanas@gmail.com' ? 'DATA SRT 39 GARUT' : profile?.displayName}
+          </h3>
+          <p className="text-[10px] text-gray-400 font-medium mb-1">{profile?.position || 'Pegawai'}</p>
+          <div className="flex items-center gap-1 text-xs text-gray-500">
+            <ShieldCheck className="w-3 h-3 text-red-600" />
+            <span>{profile?.role === 'admin' ? 'Administrator' : 'Pegawai'}</span>
+          </div>
+        </div>
+        <div className="text-right">
+          <p className="text-xs text-gray-400 font-medium">{format(currentTime, 'EEEE', { locale: id })}</p>
+          <p className="text-xs font-bold text-gray-900">{format(currentTime, 'dd MMM yyyy')}</p>
+        </div>
+      </div>
+
+      <div className="bg-gradient-to-br from-red-600 to-red-700 p-8 rounded-3xl text-white text-center shadow-xl shadow-red-100 relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-16 -mt-16 blur-2xl" />
+        <div className="relative z-10">
+          <p className="text-red-100 text-sm font-medium mb-1 uppercase tracking-widest">Waktu Sekarang</p>
+          <h2 className="text-5xl font-black tracking-tighter mb-4">
+            {format(currentTime, 'HH:mm:ss')}
+          </h2>
+          <div className="flex items-center justify-center gap-2 text-red-100 text-xs">
+            <MapPin className="w-3 h-3" />
+            <span>Garut, Jawa Barat</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <button 
+          disabled={isClocking}
+          onClick={() => handleAttendance('clock-in')}
+          className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition-all active:scale-95 disabled:opacity-50 group"
+        >
+          <div className="w-12 h-12 bg-green-50 text-green-600 rounded-xl flex items-center justify-center mx-auto mb-3 group-hover:bg-green-600 group-hover:text-white transition-colors">
+            <LogIn className="w-6 h-6" />
+          </div>
+          <span className="block font-bold text-sm">Masuk</span>
+          <span className="text-[10px] text-gray-400 font-medium">Clock In</span>
+        </button>
+        <button 
+          disabled={isClocking}
+          onClick={() => handleAttendance('clock-out')}
+          className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition-all active:scale-95 disabled:opacity-50 group"
+        >
+          <div className="w-12 h-12 bg-orange-50 text-orange-600 rounded-xl flex items-center justify-center mx-auto mb-3 group-hover:bg-orange-600 group-hover:text-white transition-colors">
+            <LogOut className="w-6 h-6" />
+          </div>
+          <span className="block font-bold text-sm">Pulang</span>
+          <span className="text-[10px] text-gray-400 font-medium">Clock Out</span>
+        </button>
+      </div>
+
+      <AnimatePresence>
+        {status && (
+          <motion.div 
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className={`p-4 rounded-xl flex items-center gap-3 ${status.type === 'success' ? 'bg-green-50 text-green-700 border border-green-100' : 'bg-red-50 text-red-700 border border-red-100'}`}
+          >
+            {status.type === 'success' ? <CheckCircle2 className="w-5 h-5 shrink-0" /> : <AlertCircle className="w-5 h-5 shrink-0" />}
+            <p className="text-sm font-medium">{status.message}</p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+
+  const renderHistoryTab = () => (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between px-1">
+        <h4 className="font-bold text-gray-900 flex items-center gap-2">
+          <History className="w-5 h-5 text-red-600" />
+          Riwayat Absensi
+        </h4>
+        {attendanceHistory.length > 0 && (
+          <button 
+            onClick={exportToPDF}
+            className="flex items-center gap-1 text-xs font-bold bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 transition-colors shadow-sm"
+          >
+            <Download className="w-3.5 h-3.5" />
+            Export PDF
+          </button>
+        )}
+      </div>
+      <div className="space-y-3">
+        {attendanceHistory.length === 0 ? (
+          <div className="bg-white p-12 rounded-3xl border border-dashed border-gray-200 text-center">
+            <p className="text-gray-400 text-sm">Belum ada riwayat absensi</p>
+          </div>
+        ) : (
+          attendanceHistory.map((record) => (
+            <motion.div 
+              key={record.id}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex items-center justify-between"
+            >
+              <div className="flex items-center gap-4">
+                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center overflow-hidden shadow-inner ${record.type === 'clock-in' ? 'bg-green-50 text-green-600' : 'bg-orange-50 text-orange-600'}`}>
+                  {record.photoUrl ? (
+                    <img src={record.photoUrl} alt="Bukti" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  ) : (
+                    record.type === 'clock-in' ? <LogIn className="w-6 h-6" /> : <LogOut className="w-6 h-6" />
+                  )}
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-gray-900">{record.userName || 'Pegawai'}</p>
+                  <p className="text-[10px] text-gray-500 font-medium">
+                    <span className={record.type === 'clock-in' ? 'text-green-600' : 'text-orange-600'}>
+                      {record.type === 'clock-in' ? 'Masuk' : 'Pulang'}
+                    </span>
+                    {' • '}
+                    {format(new Date(record.timestamp), 'dd MMM, HH:mm', { locale: id })}
+                  </p>
+                </div>
+              </div>
+              <div className="text-right">
+                <MapPin className="w-4 h-4 text-gray-300 ml-auto" />
+              </div>
+            </motion.div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+
+  const renderDashboardTab = () => {
+    const statuses = getEmployeeStatus();
+    const presentCount = statuses.filter(s => s.hasClockIn).length;
+
+    return (
+      <div className="space-y-6">
+        {/* Summary Card */}
+        <div className="bg-gradient-to-br from-red-600 to-red-700 p-6 rounded-3xl text-white shadow-xl shadow-red-100">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h4 className="font-bold text-red-100 text-sm uppercase tracking-widest">Ringkasan Kehadiran</h4>
+              <p className="text-2xl font-black">{format(new Date(), 'dd MMMM yyyy', { locale: id })}</p>
+            </div>
+            <div className="bg-white/20 p-3 rounded-2xl backdrop-blur-sm">
+              <Users className="w-6 h-6" />
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-4">
+            <div className="bg-white/10 p-3 rounded-2xl border border-white/10">
+              <p className="text-[10px] text-red-100 font-bold uppercase">Total</p>
+              <p className="text-xl font-black">{DEFAULT_EMPLOYEES.length}</p>
+            </div>
+            <div className="bg-white/10 p-3 rounded-2xl border border-white/10">
+              <p className="text-[10px] text-red-100 font-bold uppercase">Hadir</p>
+              <p className="text-xl font-black">{presentCount}</p>
+            </div>
+            <div className="bg-white/10 p-3 rounded-2xl border border-white/10">
+              <p className="text-[10px] text-red-100 font-bold uppercase">Absen</p>
+              <p className="text-xl font-black">{DEFAULT_EMPLOYEES.length - presentCount}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* List of Present Employees */}
+        <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+          <div className="flex items-center justify-between mb-4">
+            <h4 className="font-bold text-gray-900">Daftar Kehadiran Pegawai</h4>
+            <button 
+              onClick={exportToPDF}
+              className="text-[10px] font-bold text-red-600 bg-red-50 px-3 py-1.5 rounded-full hover:bg-red-600 hover:text-white transition-all"
+            >
+              Export PDF
+            </button>
+          </div>
+          <div className="space-y-3">
+            {statuses.map(emp => (
+              <div key={emp.nip} className="flex items-center justify-between p-3 bg-gray-50 rounded-2xl border border-gray-100 hover:bg-white hover:shadow-md transition-all group">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-gray-400 border border-gray-200 font-bold text-xs group-hover:border-red-200 group-hover:text-red-600 transition-colors">
+                    {emp.name.split(' ').map(n => n[0]).join('').substring(0, 2)}
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold text-gray-900">{emp.name}</p>
+                    <p className="text-[9px] text-gray-500 font-bold uppercase tracking-tighter">{emp.nip}</p>
+                    <p className="text-[9px] text-gray-400 font-medium">{emp.position}</p>
+                  </div>
+                </div>
+                <div className="flex gap-4 items-center">
+                  <div className="text-center">
+                    <p className="text-[8px] text-gray-400 font-bold uppercase">Masuk</p>
+                    <p className={`text-[10px] font-black ${emp.hasClockIn ? 'text-green-600' : 'text-gray-300'}`}>
+                      {emp.clockInTime || '--:--'}
+                    </p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-[8px] text-gray-400 font-bold uppercase">Pulang</p>
+                    <p className={`text-[10px] font-black ${emp.hasClockOut ? 'text-orange-600' : 'text-gray-300'}`}>
+                      {emp.clockOutTime || '--:--'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderProfileTab = () => (
+    <div className="space-y-6">
+      <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 text-center">
+        <div className="w-24 h-24 bg-gray-100 rounded-full overflow-hidden border-4 border-white shadow-lg mx-auto mb-4">
+          <img 
+            src={user?.photoURL || `https://ui-avatars.com/api/?name=${profile?.displayName}&background=random`} 
+            alt="Profile" 
+            className="w-full h-full object-cover"
+          />
+        </div>
+        <h3 className="text-xl font-bold text-gray-900 mb-1">{profile?.displayName}</h3>
+        <p className="text-sm text-gray-500 mb-6">{profile?.position || 'Pegawai'}</p>
+        <button 
+          onClick={handleLogout}
+          className="w-full py-4 bg-gray-100 text-gray-600 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-red-50 hover:text-red-600 transition-all"
+        >
+          <LogOut className="w-5 h-5" />
+          Keluar dari Akun
+        </button>
+      </div>
+    </div>
+  );
 
   const exportToPDF = () => {
     if (!user || attendanceHistory.length === 0) return;
@@ -492,13 +783,14 @@ export default function App() {
     const tableData = attendanceHistory.map(record => [
       record.userName || 'Pegawai',
       record.nip || '-',
+      record.position || '-',
       record.type === 'clock-in' ? 'Masuk' : 'Pulang',
       format(new Date(record.timestamp), 'dd/MM/yyyy', { locale: id }),
       format(new Date(record.timestamp), 'HH:mm', { locale: id }),
       `${record.location.latitude.toFixed(6)}, ${record.location.longitude.toFixed(6)}`
     ]);
 
-    const tableHead = [['Nama Pegawai', 'NIP', 'Tipe', 'Tanggal', 'Jam', 'Koordinat']];
+    const tableHead = [['Nama Pegawai', 'NIP', 'Jabatan', 'Tipe', 'Tanggal', 'Jam', 'Koordinat']];
 
     autoTable(doc, {
       startY: 75,
@@ -800,6 +1092,10 @@ export default function App() {
                               {record.userName || 'Pegawai'}
                             </p>
                             <p className="text-[10px] text-gray-500 font-medium">
+                              {record.nip && <span className="mr-2">NIP: {record.nip}</span>}
+                              {record.position && <span>• {record.position}</span>}
+                            </p>
+                            <p className="text-[10px] text-gray-500 font-medium mt-0.5">
                               <span className={record.type === 'clock-in' ? 'text-green-600' : 'text-orange-600'}>
                                 {record.type === 'clock-in' ? 'Masuk' : 'Pulang'}
                               </span>
@@ -826,15 +1122,36 @@ export default function App() {
         {/* Bottom Navigation (Mobile Style) */}
         {user && (
           <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-6 py-3 flex items-center justify-around max-w-md mx-auto shadow-2xl z-20">
-            <button className="flex flex-col items-center gap-1 text-red-600">
+            <button 
+              onClick={() => setActiveTab('absen')}
+              className={`flex flex-col items-center gap-1 ${activeTab === 'absen' ? 'text-red-600' : 'text-gray-400'}`}
+            >
               <Clock className="w-6 h-6" />
               <span className="text-[10px] font-bold">Absen</span>
             </button>
-            <button className="flex flex-col items-center gap-1 text-gray-400 hover:text-red-600 transition-colors">
+            
+            {(profile?.role === 'admin' || profile?.email === 'datapkmcipanas@gmail.com') && (
+              <button 
+                onClick={() => setActiveTab('dashboard')}
+                className={`flex flex-col items-center gap-1 ${activeTab === 'dashboard' ? 'text-red-600' : 'text-gray-400'}`}
+              >
+                <ShieldCheck className="w-6 h-6" />
+                <span className="text-[10px] font-bold">Admin</span>
+              </button>
+            )}
+
+            <button 
+              onClick={() => setActiveTab('history')}
+              className={`flex flex-col items-center gap-1 ${activeTab === 'history' ? 'text-red-600' : 'text-gray-400'}`}
+            >
               <History className="w-6 h-6" />
               <span className="text-[10px] font-bold">Riwayat</span>
             </button>
-            <button className="flex flex-col items-center gap-1 text-gray-400 hover:text-red-600 transition-colors">
+            
+            <button 
+              onClick={() => setActiveTab('profile')}
+              className={`flex flex-col items-center gap-1 ${activeTab === 'profile' ? 'text-red-600' : 'text-gray-400'}`}
+            >
               <User className="w-6 h-6" />
               <span className="text-[10px] font-bold">Profil</span>
             </button>

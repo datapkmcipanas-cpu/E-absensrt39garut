@@ -17,6 +17,9 @@ service cloud.firestore {
     // Document ID: auto-generated
     // Fields:
     //   - userId: string (required, matches auth.uid)
+    //   - userName: string (required)
+    //   - nip: string (optional)
+    //   - position: string (optional)
     //   - timestamp: string (required, ISO 8601)
     //   - type: string (required, enum: ['clock-in', 'clock-out'])
     //   - location: map (required)
@@ -68,16 +71,17 @@ service cloud.firestore {
 
     function isValidAttendance(data) {
       return data.keys().hasAll(['userId', 'userName', 'timestamp', 'type', 'location']) &&
-             data.keys().hasOnly(['userId', 'userName', 'nip', 'timestamp', 'type', 'location', 'photoUrl']) &&
+             data.keys().hasOnly(['userId', 'userName', 'nip', 'position', 'timestamp', 'type', 'location', 'photoUrl']) &&
              data.userId == request.auth.uid &&
-             data.userName is string && data.userName.size() > 0 &&
-             (!('nip' in data) || (data.nip is string)) &&
+             data.userName is string && data.userName.size() > 0 && data.userName.size() < 200 &&
+             (!('nip' in data) || (data.nip is string && data.nip.size() < 100)) &&
+             (!('position' in data) || (data.position is string && data.position.size() < 200)) &&
              isValidDateString(data.timestamp) &&
              data.type in ['clock-in', 'clock-out'] &&
              data.location is map &&
              data.location.latitude is number &&
              data.location.longitude is number &&
-             (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() < 200000));
+             (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() < 500000));
     }
 
     // ===============================================================
