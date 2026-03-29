@@ -20,5 +20,6 @@ export const DEFAULT_EMPLOYEES: DefaultEmployee[] = [
   { name: "RAHMA HALIMATU SYADIAH", position: "Wali Asrama", nip: "24990130820002881" },
   { name: "RIKA SYABIAH BURHAN", position: "Wali Asrama", nip: "24990130820000379" },
   { name: "AGUNG RUDIANA", position: "Wali Asrama", nip: "24990130810004196" },
-  { name: "BABAN HIKMAT BACHTIAR", position: "OPERATOR LAYANAN OPERASIONAL", nip: "24990130810000317" }
+  { name: "BABAN HIKMAT BACHTIAR", position: "OPERATOR LAYANAN OPERASIONAL", nip: "24990130810000317" },
+  { name: "ADMIN SISTEM", position: "Administrator", nip: "198402192025211061" }
 ];

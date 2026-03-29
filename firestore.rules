@@ -67,9 +67,11 @@ service cloud.firestore {
     }
 
     function isValidAttendance(data) {
-      return data.keys().hasAll(['userId', 'timestamp', 'type', 'location']) &&
-             data.keys().hasOnly(['userId', 'timestamp', 'type', 'location', 'photoUrl']) &&
+      return data.keys().hasAll(['userId', 'userName', 'timestamp', 'type', 'location']) &&
+             data.keys().hasOnly(['userId', 'userName', 'nip', 'timestamp', 'type', 'location', 'photoUrl']) &&
              data.userId == request.auth.uid &&
+             data.userName is string && data.userName.size() > 0 &&
+             (!('nip' in data) || (data.nip is string)) &&
              isValidDateString(data.timestamp) &&
              data.type in ['clock-in', 'clock-out'] &&
              data.location is map &&
@@ -83,7 +85,10 @@ service cloud.firestore {
     // ===============================================================
     match /users/{userId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data) && (request.resource.data.role == 'employee' || isAdmin());
+      allow create: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data) && 
+        (request.resource.data.role == 'employee' || 
+         isAdmin() || 
+         request.resource.data.email == "nip_198402192025211061@srt39garut.com");
       allow update: if isAuthenticated() && (isAdmin() || (isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.role == resource.data.role));
     }
 

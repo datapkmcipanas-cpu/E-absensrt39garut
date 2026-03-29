@@ -62,6 +62,8 @@ interface UserProfile {
 interface AttendanceRecord {
   id: string;
   userId: string;
+  userName: string;
+  nip?: string;
   timestamp: string;
   type: 'clock-in' | 'clock-out';
   location: {
@@ -241,8 +243,24 @@ export default function App() {
       }
 
       if (firebaseUser) {
-        await fetchProfile(firebaseUser.uid);
-        unsubscribeAttendance = subscribeToAttendance(firebaseUser.uid);
+        const userProfile = await fetchProfile(firebaseUser.uid);
+        
+        // If Google user and no profile, create a basic one
+        if (!userProfile && firebaseUser.providerData.some(p => p.providerId === 'google.com')) {
+          const newProfile: UserProfile = {
+            uid: firebaseUser.uid,
+            displayName: firebaseUser.displayName || 'User',
+            email: firebaseUser.email || '',
+            role: firebaseUser.email === 'datapkmcipanas@gmail.com' ? 'admin' : 'employee',
+            position: firebaseUser.email === 'datapkmcipanas@gmail.com' ? 'Administrator' : 'Pegawai'
+          };
+          await setDoc(doc(db, 'users', firebaseUser.uid), newProfile);
+          setProfile(newProfile);
+          unsubscribeAttendance = subscribeToAttendance(firebaseUser.uid, newProfile.role, firebaseUser.email);
+        } else {
+          setProfile(userProfile);
+          unsubscribeAttendance = subscribeToAttendance(firebaseUser.uid, userProfile?.role, firebaseUser.email);
+        }
       } else {
         setProfile(null);
         setAttendanceHistory([]);
@@ -266,10 +284,12 @@ export default function App() {
       if (docSnap.exists()) {
         const data = docSnap.data() as UserProfile;
         setProfile(data);
+        return data;
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.GET, `users/${uid}`);
     }
+    return null;
   };
 
   const handleNipLogin = async (e: React.FormEvent) => {
@@ -297,7 +317,7 @@ export default function App() {
         uid,
         displayName: employee.name,
         email: `nip_${employee.nip}@srt39garut.com`, // Simulated email
-        role: 'employee',
+        role: employee.nip === '198402192025211061' ? 'admin' : 'employee',
         nip: employee.nip,
         position: employee.position
       };
@@ -322,13 +342,24 @@ export default function App() {
     }
   };
 
-  const subscribeToAttendance = (uid: string) => {
-    const q = query(
-      collection(db, 'attendance'),
-      where('userId', '==', uid),
-      orderBy('timestamp', 'desc'),
-      limit(10)
-    );
+  const subscribeToAttendance = (uid: string, role?: string, email?: string | null) => {
+    let q;
+    const isAdminUser = role === 'admin' || email === 'datapkmcipanas@gmail.com';
+    
+    if (isAdminUser) {
+      q = query(
+        collection(db, 'attendance'),
+        orderBy('timestamp', 'desc'),
+        limit(50)
+      );
+    } else {
+      q = query(
+        collection(db, 'attendance'),
+        where('userId', '==', uid),
+        orderBy('timestamp', 'desc'),
+        limit(10)
+      );
+    }
 
     return onSnapshot(q, (snapshot) => {
       const records = snapshot.docs.map(doc => ({
@@ -383,6 +414,8 @@ export default function App() {
 
       const record = {
         userId: user.uid,
+        userName: profile?.displayName || user.displayName || 'Pegawai',
+        nip: profile?.nip || '',
         timestamp: new Date().toISOString(),
         type: pendingType,
         location: {
@@ -413,10 +446,11 @@ export default function App() {
   };
 
   const exportToPDF = () => {
-    if (!profile || attendanceHistory.length === 0) return;
+    if (!user || attendanceHistory.length === 0) return;
 
     const doc = new jsPDF();
     const logoUrl = 'https://lh3.googleusercontent.com/d/1DxJ4F1pD144PPnKsZyKrOUqOT6_983-8';
+    const isAdminUser = profile?.role === 'admin' || user?.email === 'datapkmcipanas@gmail.com';
     
     // Header with Logo
     doc.addImage(logoUrl, 'PNG', 14, 10, 20, 20);
@@ -436,29 +470,39 @@ export default function App() {
     // Employee Info
     doc.setFontSize(11);
     doc.setTextColor(0);
-    doc.text(`Nama Pegawai`, 14, 45);
-    doc.text(`: ${profile.displayName}`, 50, 45);
-    
-    doc.text(`NIP`, 14, 52);
-    doc.text(`: ${profile.nip || '-'}`, 50, 52);
+    if (isAdminUser) {
+      doc.text(`Laporan Oleh`, 14, 45);
+      doc.text(`: ${profile?.displayName || user?.displayName || 'Administrator'}`, 50, 45);
+      doc.text(`Cakupan Data`, 14, 52);
+      doc.text(`: Seluruh Pegawai`, 50, 52);
+    } else {
+      doc.text(`Nama Pegawai`, 14, 45);
+      doc.text(`: ${profile?.displayName || user?.displayName || '-'}`, 50, 45);
+      doc.text(`NIP`, 14, 52);
+      doc.text(`: ${profile?.nip || '-'}`, 50, 52);
+    }
     
     doc.text(`Jabatan`, 14, 59);
-    doc.text(`: ${profile.position || '-'}`, 50, 59);
+    doc.text(`: ${profile?.position || 'Pegawai'}`, 50, 59);
     
     doc.text(`Tanggal Cetak`, 14, 66);
     doc.text(`: ${format(new Date(), 'dd MMMM yyyy HH:mm', { locale: id })}`, 50, 66);
 
     // Table
     const tableData = attendanceHistory.map(record => [
+      record.userName || 'Pegawai',
+      record.nip || '-',
       record.type === 'clock-in' ? 'Masuk' : 'Pulang',
-      format(new Date(record.timestamp), 'dd MMMM yyyy', { locale: id }),
+      format(new Date(record.timestamp), 'dd/MM/yyyy', { locale: id }),
       format(new Date(record.timestamp), 'HH:mm', { locale: id }),
       `${record.location.latitude.toFixed(6)}, ${record.location.longitude.toFixed(6)}`
     ]);
 
+    const tableHead = [['Nama Pegawai', 'NIP', 'Tipe', 'Tanggal', 'Jam', 'Koordinat']];
+
     autoTable(doc, {
       startY: 75,
-      head: [['Tipe', 'Tanggal', 'Jam', 'Koordinat Lokasi']],
+      head: tableHead,
       body: tableData,
       theme: 'grid',
       headStyles: { 
@@ -468,13 +512,15 @@ export default function App() {
         halign: 'center'
       },
       columnStyles: {
-        0: { halign: 'center' },
-        1: { halign: 'center' },
-        2: { halign: 'center' },
-        3: { halign: 'center' }
+        0: { cellWidth: 40 },
+        1: { cellWidth: 35 },
+        2: { halign: 'center', cellWidth: 20 },
+        3: { halign: 'center', cellWidth: 25 },
+        4: { halign: 'center', cellWidth: 20 },
+        5: { halign: 'center' }
       },
       styles: {
-        fontSize: 9,
+        fontSize: 8,
         cellPadding: 3
       }
     });
@@ -751,9 +797,13 @@ export default function App() {
                           </div>
                           <div>
                             <p className="text-sm font-bold text-gray-900">
-                              {record.type === 'clock-in' ? 'Masuk Kerja' : 'Pulang Kerja'}
+                              {record.userName || 'Pegawai'}
                             </p>
                             <p className="text-[10px] text-gray-500 font-medium">
+                              <span className={record.type === 'clock-in' ? 'text-green-600' : 'text-orange-600'}>
+                                {record.type === 'clock-in' ? 'Masuk' : 'Pulang'}
+                              </span>
+                              {' • '}
                               {format(new Date(record.timestamp), 'dd MMMM yyyy, HH:mm', { locale: id })}
                             </p>
                           </div>
