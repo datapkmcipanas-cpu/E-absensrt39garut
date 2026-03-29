@@ -116,13 +116,13 @@ const CameraCapture = ({ onCapture, onCancel }: { onCapture: (base64: string) =>
       
       if (context) {
         // Set canvas size to a smaller resolution to keep base64 string small for Firestore
-        const width = 480;
+        const width = 320;
         const height = (video.videoHeight / video.videoWidth) * width;
         canvas.width = width;
         canvas.height = height;
         
         context.drawImage(video, 0, 0, width, height);
-        const base64 = canvas.toDataURL('image/jpeg', 0.7);
+        const base64 = canvas.toDataURL('image/jpeg', 0.5);
         onCapture(base64);
         stopCamera();
       }
@@ -407,8 +407,8 @@ export default function App() {
       const position = await new Promise<GeolocationPosition>((resolve, reject) => {
         navigator.geolocation.getCurrentPosition(resolve, reject, {
           enableHighAccuracy: true,
-          timeout: 10000,
-          maximumAge: 0
+          timeout: 7000,
+          maximumAge: 60000
         });
       });
 
