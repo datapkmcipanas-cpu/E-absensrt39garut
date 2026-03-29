@@ -238,6 +238,7 @@ export default function App() {
     let unsubscribeAttendance: (() => void) | null = null;
 
     const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
+      setLoading(true);
       setUser(firebaseUser);
       
       // Clean up previous subscription if it exists
@@ -247,23 +248,42 @@ export default function App() {
       }
 
       if (firebaseUser) {
-        const userProfile = await fetchProfile(firebaseUser.uid);
-        
-        // If Google user and no profile, create a basic one
-        if (!userProfile && firebaseUser.providerData.some(p => p.providerId === 'google.com')) {
-          const newProfile: UserProfile = {
-            uid: firebaseUser.uid,
-            displayName: firebaseUser.displayName || 'User',
-            email: firebaseUser.email || '',
-            role: firebaseUser.email === 'datapkmcipanas@gmail.com' ? 'admin' : 'employee',
-            position: firebaseUser.email === 'datapkmcipanas@gmail.com' ? 'Administrator' : 'Pegawai'
-          };
-          await setDoc(doc(db, 'users', firebaseUser.uid), newProfile);
-          setProfile(newProfile);
-          unsubscribeAttendance = subscribeToAttendance(firebaseUser.uid, newProfile.role, firebaseUser.email);
-        } else {
-          setProfile(userProfile);
-          unsubscribeAttendance = subscribeToAttendance(firebaseUser.uid, userProfile?.role, firebaseUser.email);
+        try {
+          let userProfile = await fetchProfile(firebaseUser.uid);
+          
+          // If profile is missing but it's a NIP user, it might be a race condition with setDoc in handleNipLogin
+          if (!userProfile && firebaseUser.email?.startsWith('nip_')) {
+            // Wait a bit and retry
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            userProfile = await fetchProfile(firebaseUser.uid);
+          }
+
+          // If Google user and no profile, create a basic one
+          if (!userProfile && firebaseUser.providerData.some(p => p.providerId === 'google.com')) {
+            const newProfile: UserProfile = {
+              uid: firebaseUser.uid,
+              displayName: firebaseUser.displayName || 'User',
+              email: firebaseUser.email || '',
+              role: firebaseUser.email === 'datapkmcipanas@gmail.com' ? 'admin' : 'employee',
+              position: firebaseUser.email === 'datapkmcipanas@gmail.com' ? 'Administrator' : 'Pegawai'
+            };
+            await setDoc(doc(db, 'users', firebaseUser.uid), newProfile);
+            setProfile(newProfile);
+            unsubscribeAttendance = subscribeToAttendance(firebaseUser.uid, newProfile.role, firebaseUser.email);
+          } else {
+            // Even if profile is null (e.g. just created in handleNipLogin but not yet indexed)
+            // we still want to subscribe. handleNipLogin sets the profile state too.
+            if (userProfile) {
+              setProfile(userProfile);
+              unsubscribeAttendance = subscribeToAttendance(firebaseUser.uid, userProfile.role, firebaseUser.email);
+            } else {
+              // Fallback for immediate subscription after NIP login
+              // The role will be determined by email in subscribeToAttendance
+              unsubscribeAttendance = subscribeToAttendance(firebaseUser.uid, undefined, firebaseUser.email);
+            }
+          }
+        } catch (error) {
+          console.error("Error in auth state change:", error);
         }
       } else {
         setProfile(null);
@@ -373,7 +393,9 @@ export default function App() {
 
   const subscribeToAttendance = (uid: string, role?: string, email?: string | null) => {
     let q;
-    const isAdminUser = role === 'admin' || email === 'datapkmcipanas@gmail.com';
+    const isAdminUser = role === 'admin' || 
+                       email === 'datapkmcipanas@gmail.com' || 
+                       email === 'nip_198402192025211061@srt39garut.com';
     
     if (isAdminUser) {
       q = query(
@@ -411,8 +433,12 @@ export default function App() {
 
   const handleLogout = async () => {
     try {
-      await signOut(auth);
+      setAttendanceHistory([]);
+      setProfile(null);
+      setUser(null);
+      setActiveTab('absen');
       setNipInput('');
+      await signOut(auth);
     } catch (error) {
       console.error('Logout error:', error);
     }
@@ -1079,6 +1105,13 @@ export default function App() {
                     Riwayat Terbaru
                   </h4>
                   <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => window.location.reload()}
+                      className="flex items-center gap-1 text-[10px] font-bold bg-blue-50 text-blue-600 px-2 py-1 rounded-md hover:bg-blue-100 transition-colors"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                      Sinkron
+                    </button>
                     {attendanceHistory.length > 0 && (
                       <button 
                         onClick={exportToPDF}
@@ -1096,6 +1129,7 @@ export default function App() {
                   {attendanceHistory.length === 0 ? (
                     <div className="bg-white p-8 rounded-2xl border border-dashed border-gray-200 text-center">
                       <p className="text-gray-400 text-sm">Belum ada riwayat absensi</p>
+                      <p className="text-[10px] text-gray-400 mt-2">Catatan: Riwayat lama sebelum pembaruan sistem mungkin tidak muncul.</p>
                     </div>
                   ) : (
                     attendanceHistory.map((record) => (
