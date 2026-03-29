@@ -4,6 +4,8 @@ import {
   signInWithPopup, 
   signOut, 
   signInAnonymously,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
   User as FirebaseUser 
 } from 'firebase/auth';
 import { 
@@ -311,15 +313,35 @@ export default function App() {
     }
 
     try {
-      // Sign in anonymously to get a UID
-      const cred = await signInAnonymously(auth);
+      // Use Email/Password for persistent identity across login/logout
+      const email = `nip_${employee.nip}@srt39garut.com`;
+      const password = `nip_${employee.nip}_secret`; // Consistent password for the NIP
+
+      let cred;
+      try {
+        // Try to sign in first
+        cred = await signInWithEmailAndPassword(auth, email, password);
+      } catch (signInError: any) {
+        // If user not found, create a new one
+        if (signInError.code === 'auth/user-not-found' || signInError.code === 'auth/invalid-credential') {
+          try {
+            cred = await createUserWithEmailAndPassword(auth, email, password);
+          } catch (createError: any) {
+            // If creation fails (e.g. already exists but password mismatch, though unlikely here)
+            throw createError;
+          }
+        } else {
+          throw signInError;
+        }
+      }
+
       const uid = cred.user.uid;
 
       // Create/Update profile
       const newProfile: UserProfile = {
         uid,
         displayName: employee.name,
-        email: `nip_${employee.nip}@srt39garut.com`, // Simulated email
+        email: email,
         role: employee.nip === '198402192025211061' ? 'admin' : 'employee',
         nip: employee.nip,
         position: employee.position
@@ -332,9 +354,13 @@ export default function App() {
       let message = 'Gagal masuk. Silakan coba lagi.';
       
       if (error.code === 'auth/operation-not-allowed') {
-        message = 'Login NIP (Anonymous Auth) belum diaktifkan di Firebase Console. Silakan hubungi admin untuk mengaktifkan provider "Anonymous" di tab Authentication.';
+        message = 'Login NIP (Email/Password) belum diaktifkan di Firebase Console. Silakan hubungi admin untuk mengaktifkan provider "Email/Password" di tab Authentication.';
       } else if (error.code === 'auth/network-request-failed') {
         message = 'Koneksi internet bermasalah. Silakan periksa koneksi Anda.';
+      } else if (error.code === 'auth/weak-password') {
+        message = 'Password terlalu lemah.';
+      } else if (error.code === 'auth/invalid-email') {
+        message = 'Format email tidak valid.';
       } else if (error.message) {
         message = `Error: ${error.message}`;
       }
@@ -360,7 +386,7 @@ export default function App() {
         collection(db, 'attendance'),
         where('userId', '==', uid),
         orderBy('timestamp', 'desc'),
-        limit(10)
+        limit(50)
       );
     }
 
