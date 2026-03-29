@@ -1,0 +1,47 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Employee information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "displayName": { "type": "string", "description": "Full name" },
+        "email": { "type": "string", "format": "email", "description": "Email address" },
+        "role": { "type": "string", "enum": ["admin", "employee"], "description": "User role" },
+        "nip": { "type": "string", "description": "Nomor Induk Pegawai" },
+        "position": { "type": "string", "description": "Jabatan/Posisi" }
+      },
+      "required": ["uid", "displayName", "email", "role"]
+    },
+    "Attendance": {
+      "title": "Attendance",
+      "description": "Daily attendance record with photo proof",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Reference to User uid" },
+        "timestamp": { "type": "string", "format": "date-time", "description": "Time of action" },
+        "type": { "type": "string", "enum": ["clock-in", "clock-out"], "description": "Type of attendance" },
+        "location": {
+          "type": "object",
+          "properties": {
+            "latitude": { "type": "number" },
+            "longitude": { "type": "number" }
+          }
+        },
+        "photoUrl": { "type": "string", "description": "Optional photo proof" }
+      },
+      "required": ["userId", "timestamp", "type", "location"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile documents"
+    },
+    "/attendance/{attendanceId}": {
+      "schema": "Attendance",
+      "description": "Attendance records"
+    }
+  }
+}

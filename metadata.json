@@ -1,0 +1,5 @@
+{
+  "name": "Absen SRT 39 GARUT",
+  "description": "Aplikasi absensi pegawai SRT 39 GARUT dengan fitur pencatatan waktu dan riwayat kehadiran.",
+  "requestFramePermissions": ["geolocation", "camera"]
+}

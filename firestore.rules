@@ -1,0 +1,96 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: userId (auth.uid)
+    // Fields:
+    //   - uid: string (required)
+    //   - displayName: string (required)
+    //   - email: string (required, email format)
+    //   - role: string (required, enum: ['admin', 'employee'])
+    //
+    // Collection: attendance
+    // Document ID: auto-generated
+    // Fields:
+    //   - userId: string (required, matches auth.uid)
+    //   - timestamp: string (required, ISO 8601)
+    //   - type: string (required, enum: ['clock-in', 'clock-out'])
+    //   - location: map (required)
+    //     - latitude: number
+    //     - longitude: number
+    //   - photoUrl: string (optional)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+         (request.auth.token.email == "datapkmcipanas@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidDateString(dateStr) {
+      return dateStr is string && dateStr.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*Z?$");
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'displayName', 'email', 'role']) &&
+             data.keys().hasOnly(['uid', 'displayName', 'email', 'role', 'nip', 'position']) &&
+             data.uid is string && data.uid.size() > 0 &&
+             data.displayName is string && data.displayName.size() > 0 && data.displayName.size() < 100 &&
+             (isValidEmail(data.email) || data.email.matches("^nip_.*@srt39garut\\.com$")) &&
+             data.role in ['admin', 'employee'] &&
+             (!('nip' in data) || (data.nip is string && data.nip.size() < 50)) &&
+             (!('position' in data) || (data.position is string && data.position.size() < 100));
+    }
+
+    function isValidAttendance(data) {
+      return data.keys().hasAll(['userId', 'timestamp', 'type', 'location']) &&
+             data.keys().hasOnly(['userId', 'timestamp', 'type', 'location', 'photoUrl']) &&
+             data.userId == request.auth.uid &&
+             isValidDateString(data.timestamp) &&
+             data.type in ['clock-in', 'clock-out'] &&
+             data.location is map &&
+             data.location.latitude is number &&
+             data.location.longitude is number &&
+             (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() < 200000));
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data) && (request.resource.data.role == 'employee' || isAdmin());
+      allow update: if isAuthenticated() && (isAdmin() || (isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.role == resource.data.role));
+    }
+
+    match /attendance/{attendanceId} {
+      allow read: if isAuthenticated() && (isAdmin() || resource.data.userId == request.auth.uid);
+      allow create: if isAuthenticated() && isValidAttendance(request.resource.data);
+      allow update, delete: if isAdmin();
+    }
+  }
+}
