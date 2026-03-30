@@ -531,8 +531,8 @@ export default function App() {
       
       let successMsg = '';
       switch(pendingType) {
-        case 'clock-in': successMsg = 'Berhasil Masuk!'; break;
-        case 'clock-out': successMsg = 'Berhasil Pulang!'; break;
+        case 'clock-in': successMsg = 'Berhasil Masuk! Hatur nuhun tetap kompak selalu'; break;
+        case 'clock-out': successMsg = 'Berhasil Pulang! Hatur nuhun tetap kompak selalu'; break;
         case 'izin': successMsg = 'Berhasil Mengajukan Izin!'; break;
         case 'sakit': successMsg = 'Berhasil Mengajukan Sakit!'; break;
         case 'dinas-luar': successMsg = 'Berhasil Mengajukan Dinas Luar!'; break;
