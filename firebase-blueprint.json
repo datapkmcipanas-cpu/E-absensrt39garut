@@ -16,12 +16,15 @@
     },
     "Attendance": {
       "title": "Attendance",
-      "description": "Daily attendance record with photo proof",
+      "description": "Daily attendance record with photo or file proof",
       "type": "object",
       "properties": {
         "userId": { "type": "string", "description": "Reference to User uid" },
+        "userName": { "type": "string", "description": "Full name of employee" },
+        "nip": { "type": "string", "description": "Employee NIP" },
+        "position": { "type": "string", "description": "Employee Position" },
         "timestamp": { "type": "string", "format": "date-time", "description": "Time of action" },
-        "type": { "type": "string", "enum": ["clock-in", "clock-out"], "description": "Type of attendance" },
+        "type": { "type": "string", "enum": ["clock-in", "clock-out", "izin", "sakit", "dinas-luar"], "description": "Type of attendance" },
         "location": {
           "type": "object",
           "properties": {
@@ -29,9 +32,10 @@
             "longitude": { "type": "number" }
           }
         },
-        "photoUrl": { "type": "string", "description": "Optional photo proof" }
+        "photoUrl": { "type": "string", "description": "Photo or file proof (base64)" },
+        "notes": { "type": "string", "description": "Optional notes for permits" }
       },
-      "required": ["userId", "timestamp", "type", "location"]
+      "required": ["userId", "userName", "timestamp", "type", "location"]
     }
   },
   "firestore": {
