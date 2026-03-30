@@ -492,21 +492,52 @@ export default function App() {
   };
 
   const processAttendance = async (photoBase64: string, permitNotes?: string) => {
-    if (!user || !pendingType) return;
+    if (!user || !pendingType) {
+      console.warn('Missing user or pendingType', { user: !!user, pendingType });
+      return;
+    }
     
     setIsClocking(true);
     setStatus(null);
     setShowCamera(false);
 
     try {
+      console.log('Starting attendance process for type:', pendingType);
+      
+      // Check for geolocation support
+      if (!navigator.geolocation) {
+        throw new Error('Browser Anda tidak mendukung fitur lokasi (Geolocation).');
+      }
+
       // Get location
-      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-          enableHighAccuracy: true,
-          timeout: 15000,
-          maximumAge: 60000
+      setStatus({ type: 'success', message: 'Sedang mendapatkan lokasi...' });
+      
+      const getPosition = () => {
+        return new Promise<GeolocationPosition>((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            timeout: 20000,
+            maximumAge: 60000
+          });
         });
-      });
+      };
+
+      let position: GeolocationPosition;
+      try {
+        position = await getPosition();
+      } catch (geoError: any) {
+        console.error('Geolocation error:', geoError);
+        if (geoError.code === 1) { // PERMISSION_DENIED
+          throw new Error('Izin lokasi ditolak. Mohon izinkan akses lokasi di pengaturan browser/HP Anda.');
+        } else if (geoError.code === 3) { // TIMEOUT
+          throw new Error('Gagal mendapatkan lokasi (Timeout). Pastikan GPS aktif dan Anda berada di area terbuka.');
+        } else {
+          throw new Error('Gagal mendapatkan lokasi. Pastikan GPS aktif dan izin lokasi diberikan.');
+        }
+      }
+
+      console.log('Location obtained:', position.coords.latitude, position.coords.longitude);
+      setStatus({ type: 'success', message: 'Mencatat absensi...' });
 
       const record = {
         userId: user.uid,
@@ -523,44 +554,44 @@ export default function App() {
         notes: permitNotes || ''
       };
 
+      console.log('Sending record to Firestore...');
       try {
         await addDoc(collection(db, 'attendance'), record);
-      } catch (error) {
-        handleFirestoreError(error, OperationType.WRITE, 'attendance');
+        console.log('Record successfully saved to Firestore');
+      } catch (firestoreError: any) {
+        console.error('Firestore save error:', firestoreError);
+        handleFirestoreError(firestoreError, OperationType.WRITE, 'attendance');
       }
       
       let successMsg = '';
       switch(pendingType) {
         case 'clock-in': successMsg = 'Berhasil Masuk! Hatur nuhun tetap kompak selalu'; break;
         case 'clock-out': successMsg = 'Berhasil Pulang! Hatur nuhun tetap kompak selalu'; break;
-        case 'izin': successMsg = 'Berhasil Mengajukan Izin!'; break;
-        case 'sakit': successMsg = 'Berhasil Mengajukan Sakit!'; break;
-        case 'dinas-luar': successMsg = 'Berhasil Mengajukan Dinas Luar!'; break;
+        case 'izin': successMsg = 'Berhasil Mengajukan Izin! Hatur nuhun tetap kompak selalu'; break;
+        case 'sakit': successMsg = 'Berhasil Mengajukan Sakit! Hatur nuhun tetap kompak selalu'; break;
+        case 'dinas-luar': successMsg = 'Berhasil Mengajukan Dinas Luar! Hatur nuhun tetap kompak selalu'; break;
       }
       
       setStatus({ type: 'success', message: successMsg });
-    } catch (error) {
-      console.error('Attendance error:', error);
+    } catch (error: any) {
+      console.error('Attendance process error:', error);
       let errorMessage = 'Gagal mencatat absensi. Silakan coba lagi.';
       
-      if (error instanceof GeolocationPositionError) {
-        if (error.code === error.TIMEOUT) {
-          errorMessage = 'Gagal mendapatkan lokasi (Timeout). Pastikan GPS aktif dan Anda berada di area terbuka.';
-        } else if (error.code === error.PERMISSION_DENIED) {
-          errorMessage = 'Izin lokasi ditolak. Mohon izinkan akses lokasi untuk melakukan absensi.';
-        } else {
-          errorMessage = 'Gagal mendapatkan lokasi. Pastikan GPS aktif.';
-        }
-      } else if (error instanceof Error) {
+      if (error.message) {
         try {
           // Check if it's our JSON error info
           const errInfo = JSON.parse(error.message);
           if (errInfo.error) {
             errorMessage = `Gagal: ${errInfo.error}`;
+            if (errorMessage.includes('Missing or insufficient permissions')) {
+              errorMessage = 'Gagal: Izin ditolak. Pastikan data profil Anda lengkap.';
+            }
+          } else {
+            errorMessage = `Gagal: ${error.message}`;
           }
         } catch (e) {
           // Not a JSON error, use the message directly
-          errorMessage = `Gagal: ${error.message}`;
+          errorMessage = error.message.includes('Gagal:') ? error.message : `Gagal: ${error.message}`;
         }
       }
 
@@ -571,7 +602,9 @@ export default function App() {
     } finally {
       setIsClocking(false);
       setPendingType(null);
-      setTimeout(() => setStatus(null), 5000);
+      // Keep error messages longer, success messages shorter
+      const duration = status?.type === 'error' ? 10000 : 5000;
+      setTimeout(() => setStatus(null), duration);
     }
   };
 

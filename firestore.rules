@@ -81,8 +81,8 @@ service cloud.firestore {
              data.location is map &&
              data.location.latitude is number &&
              data.location.longitude is number &&
-             (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() < 1000000)) &&
-             (!('notes' in data) || (data.notes is string && data.notes.size() < 500));
+             (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() < 2000000)) &&
+             (!('notes' in data) || (data.notes is string && data.notes.size() < 1000));
     }
 
     // ===============================================================
